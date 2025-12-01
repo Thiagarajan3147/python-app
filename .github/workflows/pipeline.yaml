@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_name:
-        description: 'Docker image name'
+        description: 'Docker image name (format: registry/image or just image)'
         required: true
         default: 'python-app'
       image_tag:
@@ -23,6 +23,10 @@ on:
         description: 'Kubernetes namespace'
         required: true
         default: 'default'
+      kubeconfig_base64:
+        description: 'Base64 encoded kubeconfig (optional, uses current context if not provided)'
+        required: false
+        default: ''
 
 jobs:
   build-and-deploy:
@@ -32,24 +36,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
       - name: Build Docker image
         run: |
           docker build -t ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} .
       
-      - name: Start Minikube
-        uses: medyagh/setup-minikube@latest
-        with:
-          driver: docker
-      
-      - name: Load image into Minikube
+      - name: Set up kubeconfig
+        if: github.event.inputs.kubeconfig_base64 != ''
         run: |
-          minikube image load ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          mkdir -p $HOME/.kube
+          echo "${{ github.event.inputs.kubeconfig_base64 }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
       
       - name: Create namespace
         run: |
           kubectl create namespace ${{ github.event.inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
       
-      - name: Create Kubernetes Deployment
+      - name: Create or update Kubernetes Deployment
         run: |
           kubectl create deployment ${{ github.event.inputs.deployment_name }} \
             --image=${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
@@ -63,11 +73,13 @@ jobs:
             -n ${{ github.event.inputs.namespace }} \
             --timeout=5m
       
-      - name: Get deployment status
+      - name: Get deployment details
         run: |
+          echo "=== Deployment ==="
           kubectl get deployment ${{ github.event.inputs.deployment_name }} -n ${{ github.event.inputs.namespace }}
+          echo ""
+          echo "=== Pods ==="
           kubectl get pods -n ${{ github.event.inputs.namespace }} -l app=${{ github.event.inputs.deployment_name }}
-      
-      - name: Describe deployment
-        run: |
+          echo ""
+          echo "=== Deployment Description ==="
           kubectl describe deployment ${{ github.event.inputs.deployment_name }} -n ${{ github.event.inputs.namespace }}
