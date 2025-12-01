@@ -33,7 +33,7 @@ jobs:
       
       - name: Run Docker container
         run: |
-          docker run -d \
+          docker run -d -p 5000:5000 \
             --name ${{ github.event.inputs.container_name }} \
             ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
       
