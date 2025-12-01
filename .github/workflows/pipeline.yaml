@@ -1,4 +1,4 @@
-name: Build and Run Docker Image
+name: Build and Deploy to Minikube
 
 on:
   workflow_dispatch:
@@ -11,36 +11,63 @@ on:
         description: 'Docker image tag'
         required: true
         default: 'latest'
-      container_name:
-        description: 'Container name to run'
+      deployment_name:
+        description: 'Kubernetes deployment name'
         required: true
-        default: 'python-app-container'
+        default: 'python-app-deployment'
+      replicas:
+        description: 'Number of replicas'
+        required: true
+        default: '2'
+      namespace:
+        description: 'Kubernetes namespace'
+        required: true
+        default: 'default'
 
 jobs:
-  build-and-run:
+  build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-      
       - name: Build Docker image
         run: |
           docker build -t ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} .
       
-      - name: Run Docker container
-        run: |
-          docker run -d -p 5000:5000 \
-            --name ${{ github.event.inputs.container_name }} \
-            ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          driver: docker
       
-      - name: Get container logs
+      - name: Load image into Minikube
         run: |
-          docker logs ${{ github.event.inputs.container_name }}
+          minikube image load ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
       
-      - name: Verify container is running
+      - name: Create namespace
         run: |
-          docker ps -a | grep ${{ github.event.inputs.container_name }}
+          kubectl create namespace ${{ github.event.inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Create Kubernetes Deployment
+        run: |
+          kubectl create deployment ${{ github.event.inputs.deployment_name }} \
+            --image=${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
+            --replicas=${{ github.event.inputs.replicas }} \
+            -n ${{ github.event.inputs.namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/${{ github.event.inputs.deployment_name }} \
+            -n ${{ github.event.inputs.namespace }} \
+            --timeout=5m
+      
+      - name: Get deployment status
+        run: |
+          kubectl get deployment ${{ github.event.inputs.deployment_name }} -n ${{ github.event.inputs.namespace }}
+          kubectl get pods -n ${{ github.event.inputs.namespace }} -l app=${{ github.event.inputs.deployment_name }}
+      
+      - name: Describe deployment
+        run: |
+          kubectl describe deployment ${{ github.event.inputs.deployment_name }} -n ${{ github.event.inputs.namespace }}
