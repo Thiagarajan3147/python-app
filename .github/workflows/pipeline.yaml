@@ -1,0 +1,46 @@
+name: Build and Run Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: 'Docker image name'
+        required: true
+        default: 'python-app'
+      image_tag:
+        description: 'Docker image tag'
+        required: true
+        default: 'latest'
+      container_name:
+        description: 'Container name to run'
+        required: true
+        default: 'python-app-container'
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} .
+      
+      - name: Run Docker container
+        run: |
+          docker run -d \
+            --name ${{ github.event.inputs.container_name }} \
+            ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+      
+      - name: Get container logs
+        run: |
+          docker logs ${{ github.event.inputs.container_name }}
+      
+      - name: Verify container is running
+        run: |
+          docker ps -a | grep ${{ github.event.inputs.container_name }}
